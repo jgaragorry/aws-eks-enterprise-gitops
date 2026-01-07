@@ -13,7 +13,8 @@ spec:
     canary:
       steps:
       - setWeight: 20
-      - pause: {} # Pausa manual para que veamos el cambio en vivo
+        #- pause: {} # Pausa manual para que veamos el cambio en vivo
+      - pause: {duration: 10} # Pausa automática de 10s 
       - setWeight: 50
       - pause: {duration: 10} # Espera 10s automática
       - setWeight: 80
