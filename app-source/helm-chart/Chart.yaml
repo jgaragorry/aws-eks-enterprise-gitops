@@ -1,0 +1,6 @@
+apiVersion: v2
+name: colors-app
+description: Una app demo para Argo Rollouts
+type: application
+version: 1.0.0
+appVersion: "1.0.0"

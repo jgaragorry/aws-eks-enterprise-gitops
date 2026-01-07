@@ -1,0 +1,3 @@
+# GitOps Lab Logs
+.terragrunt-cache
+.terraform

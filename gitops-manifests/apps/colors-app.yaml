@@ -1,0 +1,25 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: colors-app
+  namespace: argocd
+  finalizers:
+  - resources-finalizer.argocd.argoproj.io # Borra la app si borras este archivo
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/jgaragorry/aws-eks-enterprise-gitops.git
+    targetRevision: HEAD
+    path: app-source/helm-chart
+    helm:
+      valueFiles:
+      - values.yaml
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: colors-ns # Namespace destino donde vivirá la app
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+    - CreateNamespace=true # Crear el namespace si no existe
