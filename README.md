@@ -50,6 +50,7 @@ Este no es un tutorial de "Hello World". Este laboratorio simula un entorno corp
 * **Scripting:** Bash (Automatización de auditoría FinOps).
 
 ---
+
 ## 📐 Arquitectura y Flujo GitOps
 
 Este diagrama ilustra el flujo de entrega continua desde el código hasta la infraestructura.
@@ -88,19 +89,19 @@ graph TD
     end
 
     %% Conexiones
-    User -->|git push| Git
-    ArgoCD -->|Sync / Poll| Git
-    ArgoCD -->|Apply Manifests| EKS
-    ArgoCD -.->|Feedback Status| User
+    User -->|"git push"| Git
+    ArgoCD -->|"Sync / Poll"| Git
+    ArgoCD -->|"Apply Manifests"| EKS
+    ArgoCD -.->|"Feedback Status"| User
 
     %% Flujo Canary
-    Rollouts -->|Traffic 20%| PodGreen
-    Rollouts -->|Traffic 80%| PodBlue
-    Service -->|User Traffic| PodBlue
-    Service -->|User Traffic| PodGreen
+    Rollouts -->|"Traffic 20%"| PodGreen
+    Rollouts -->|"Traffic 80%"| PodBlue
+    Service -->|"User Traffic"| PodBlue
+    Service -->|"User Traffic"| PodGreen
 
     %% Dependencia de Red
-    NAT -.->|Image Pull (DockerHub)| EKS
+    NAT -.->|"Image Pull (DockerHub)"| EKS
 ```
 
 ### 💡 ¿Qué explica este diagrama automáticamente?
