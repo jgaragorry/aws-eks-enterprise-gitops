@@ -105,7 +105,7 @@ graph TD
     Service -->|"User Traffic"| PodBlue
     Service -->|"User Traffic"| PodGreen
 
-    %% Dependencia de Red
+    %% Dependencia de Red (Corrección de sintaxis aquí)
     NAT -.->|"Image Pull (DockerHub)"| EKS
 ```
 
