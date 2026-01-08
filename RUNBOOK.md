@@ -1,250 +1,293 @@
-# AWS EKS Enterprise GitOps - Master Runbook v2.0
+# 📘 AWS EKS Enterprise GitOps - Master Runbook v3.0
 
 ![AWS](https://img.shields.io/badge/AWS-232F3E?style=for-the-badge&logo=amazon-aws&logoColor=white)
 ![Kubernetes](https://img.shields.io/badge/kubernetes-%23326ce5.svg?style=for-the-badge&logo=kubernetes&logoColor=white)
 ![Terraform](https://img.shields.io/badge/terraform-%235835CC.svg?style=for-the-badge&logo=terraform&logoColor=white)
+![Terragrunt](https://img.shields.io/badge/terragrunt-%235835CC.svg?style=for-the-badge&logo=terraform&logoColor=white)
 ![ArgoCD](https://img.shields.io/badge/argo-%23E56426.svg?style=for-the-badge&logo=argo&logoColor=white)
-![Bash](https://img.shields.io/badge/Shell_Script-121011?style=for-the-badge&logo=gnu-bash&logoColor=white)
+![FinOps](https://img.shields.io/badge/FinOps-Zero%20Waste-success?style=for-the-badge&logo=cash-app&logoColor=white)
 
-Este documento detalla el procedimiento estándar para desplegar, operar y **destruir** el laboratorio de GitOps sin errores de dependencias y garantizando coste cero al finalizar (FinOps).
+Este documento detalla el procedimiento estándar operativo (SOP) para desplegar, operar y destruir el laboratorio de GitOps. Está diseñado para garantizar la **integridad de los datos**, la **estabilidad de la plataforma** y la **eliminación total de costos** al finalizar.
 
 ---
 
 ## 📋 Tabla de Contenidos
-1. [Prerrequisitos y Scripts Críticos](#1-prerrequisitos-y-scripts-críticos)
-2. [Fase 1: Infraestructura (El Fix de Versiones)](#2-fase-1-infraestructura-el-fix-de-versiones)
-3. [Fase 2: Plataforma ArgoCD](#3-fase-2-plataforma-argocd)
-4. [Fase 3: GitOps & Canary Automático](#4-fase-3-gitops--canary-automático)
-5. [Fase 4: Protocolo de Destrucción (FinOps)](#5-fase-4-protocolo-de-destrucción-finops)
-6. [Sesión de Contacto](#sesión-de-contacto)
+1. [Requisitos Previos](#1-requisitos-previos)
+2. [Arquitectura del Sistema](#2-arquitectura-del-sistema)
+3. [Fase 1: Despliegue de Infraestructura (VPC & EKS)](#3-fase-1-despliegue-de-infraestructura-vpc--eks)
+4. [Fase 2: Plataforma GitOps (ArgoCD)](#4-fase-2-plataforma-gitops-argocd)
+5. [Fase 3: Operación (Canary Deployments)](#5-fase-3-operación-canary-deployments)
+6. [Fase 4: Protocolo de Destrucción TOTAL (FinOps)](#6-fase-4-protocolo-de-destrucción-total-finops)
 
 ---
 
-## 1. Prerrequisitos y Scripts Críticos
+## 1. Requisitos Previos
 
-Antes de comenzar, asegúrate de tener estos dos scripts en tu carpeta `scripts/`. Son tu seguro de vida.
+Antes de ejecutar cualquier comando, asegúrate de que tu entorno de gestión (Laptop o Bastion Host) cumpla con lo siguiente.
 
-### A. Auditor Financiero (`scripts/finops_audit.sh`)
-Detecta recursos huérfanos que Terraform olvida (LBs, NATs, EIPs).
+### A. Herramientas CLI (Versiones Mínimas)
+Verifica la instalación de las siguientes herramientas:
 
 ```bash
-#!/bin/bash
-# scripts/finops_audit.sh
-PROJECT_TAG="AWS-EKS-Enterprise-GitOps"
-CLUSTER_NAME="eks-gitops-dev"
-REGION="us-east-1"
-
-echo "🔍 AUDITORÍA FINOPS: $PROJECT_TAG"
-echo "-----------------------------------"
-
-# 1. EKS
-echo "1. Verificando EKS..."
-aws eks list-clusters --region $REGION --query "clusters[?(@=='$CLUSTER_NAME')]" --output text
-
-# 2. Load Balancers (Lo más peligroso)
-echo "2. Verificando Load Balancers (Huérfanos de K8s)..."
-aws elb describe-load-balancers --region $REGION --query "LoadBalancerDescriptions[*].[LoadBalancerName,DNSName]" --output text
-aws elbv2 describe-load-balancers --region $REGION --query "LoadBalancers[*].[LoadBalancerName,DNSName]" --output text
-
-# 3. NAT Gateways
-echo "3. Verificando NAT Gateways..."
-aws ec2 describe-nat-gateways --region $REGION --filter "Name=tag:Project,Values=$PROJECT_TAG" "Name=state,Values=available" --query "NatGateways[*].NatGatewayId" --output text
-
-# 4. Elastic IPs
-echo "4. Verificando Elastic IPs..."
-aws ec2 describe-addresses --region $REGION --filter "Name=tag:Project,Values=$PROJECT_TAG" --query "Addresses[*].PublicIp" --output text
-
-# 5. VPC
-echo "5. Verificando VPC..."
-aws ec2 describe-vpcs --region $REGION --filters "Name=tag:Project,Values=$PROJECT_TAG" --query "Vpcs[*].VpcId" --output text
-
-echo "-----------------------------------"
-echo "👉 Si ves IDs arriba, ejecuta el protocolo de destrucción."
+aws --version        # Req: v2.x
+terraform --version  # Req: v1.5+
+terragrunt --version # Req: v0.50+
+kubectl version      # Client Version
 ```
 
-### B. Destructor de VPC Zombies (`scripts/nuke_vpc.sh`)
-Fuerza la eliminación de ENIs y Security Groups bloqueados.
+### B. Scripts de Automatización
+Asegúrate de que los scripts de soporte tengan permisos de ejecución:
 
 ```bash
-#!/bin/bash
-# scripts/nuke_vpc.sh
-# USO: ./scripts/nuke_vpc.sh <VPC_ID>
-VPC_ID=$1
-REGION="us-east-1"
+chmod +x scripts/finops_audit.sh
+chmod +x scripts/nuke_vpc.sh
+```
 
-if [ -z "$VPC_ID" ]; then
-  echo "❌ Error: Debes pasar el VPC_ID como argumento."
-  exit 1
-fi
+### C. Credenciales AWS
+Exporta tus credenciales o configura el perfil predeterminado:
 
-echo "🔥 NUKE: Iniciando limpieza forzada de $VPC_ID..."
-
-# 1. Eliminar Interfaces de Red (ENIs)
-ENIS=$(aws ec2 describe-network-interfaces --region $REGION --filters Name=vpc-id,Values=$VPC_ID --query "NetworkInterfaces[*].NetworkInterfaceId" --output text)
-if [ "$ENIS" != "None" ] && [ -n "$ENIS" ]; then
-  for eni in $ENIS; do
-    echo "   - Borrando ENI: $eni"
-    aws ec2 delete-network-interface --region $REGION --network-interface-id $eni
-  done
-fi
-
-# 2. Borrar Security Groups (Romper dependencias)
-SGS=$(aws ec2 describe-security-groups --region $REGION --filters Name=vpc-id,Values=$VPC_ID --query "SecurityGroups[?GroupName!='default'].GroupId" --output text)
-if [ "$SGS" != "None" ] && [ -n "$SGS" ]; then
-  # Paso A: Revocar reglas para romper ciclos
-  for sg in $SGS; do
-      aws ec2 revoke-security-group-ingress --region $REGION --group-id $sg --protocol all --source-group $sg 2>/dev/null
-      aws ec2 revoke-security-group-egress --region $REGION --group-id $sg --protocol all --cidr 0.0.0.0/0 2>/dev/null
-  done
-  # Paso B: Borrar grupos
-  for sg in $SGS; do
-      echo "   - Borrando SG: $sg"
-      aws ec2 delete-security-group --region $REGION --group-id $sg 2>/dev/null
-  done
-fi
-
-echo "✅ Limpieza de dependencias finalizada. Ahora Terraform podrá borrar la VPC."
+```bash
+aws configure
+# AWS Access Key ID: [Tus Credenciales]
+# AWS Secret Access Key: [Tus Credenciales]
+# Default region name: us-east-1
+# Default output format: json
 ```
 
 ---
 
-## 2. Fase 1: Infraestructura (El Fix de Versiones)
+## 2. Arquitectura del Sistema
 
-**⚠️ CRÍTICO:** Evitar el "Dependency Hell" con AWS Provider v6.0.
+El siguiente diagrama ilustra el flujo de entrega continua y los componentes de infraestructura gestionados.
 
-### Paso 1: Configurar Restricciones de Versión
-Edita `iac/modules/vpc-network/versions.tf` y `iac/modules/eks-cluster/versions.tf`. Asegúrate de que el bloque `aws` sea **exactamente** así:
+```mermaid
+graph TD
+    %% Definición de Nodos Externos
+    User["👨‍💻 SysAdmin / DevOps"]
+    Git["📂 GitHub Repo<br/>(IaC & Helm Charts)"]
 
-```hcl
-terraform {
-  required_providers {
-    aws = {
-      source  = "hashicorp/aws"
-      version = ">= 5.0, < 6.0"  # 🛑 ESTO ES OBLIGATORIO PARA EVITAR ERROR EN EKS
-    }
-  }
-}
+    %% Nube AWS
+    subgraph AWS ["☁️ AWS Cloud"]
+        style AWS fill:#f9f9f9,stroke:#232F3E,stroke-width:2px
+
+        %% VPC
+        subgraph VPC ["🔒 VPC (us-east-1)"]
+            style VPC fill:#ffffff,stroke:green,stroke-dasharray: 5 5
+
+            %% EKS Cluster
+            subgraph EKS ["☸️ EKS Cluster"]
+                style EKS fill:#E1F5FE,stroke:#326ce5,stroke-width:2px
+
+                ArgoCD["🐙 ArgoCD Controller"]
+                Rollouts["🚀 Argo Rollouts"]
+
+                %% Aplicación
+                subgraph App ["Namespace: colors-ns"]
+                    PodBlue["🟦 Pods V1 (Blue)"]
+                    PodGreen["🟩 Pods V2 (Green)"]
+                    Service["⚖️ LoadBalancer"]
+                end
+            end
+
+            NAT["gateway NAT Gateway"]
+        end
+    end
+
+    %% Conexiones
+    User -->|"git push"| Git
+    ArgoCD -->|"Sync / Poll"| Git
+    ArgoCD -->|"Apply Manifests"| EKS
+    ArgoCD -.->|"Feedback Status"| User
+
+    %% Flujo Canary
+    Rollouts -->|"Traffic 20%"| PodGreen
+    Rollouts -->|"Traffic 80%"| PodBlue
+    Service -->|"User Traffic"| PodBlue
+    Service -->|"User Traffic"| PodGreen
+
+    %% Dependencia de Red
+    NAT -.->|"Image Pull (DockerHub)"| EKS
 ```
 
-### Paso 2: Despliegue Limpio (VPC + EKS)
-Ejecuta en orden:
+---
 
+## 3. Fase 1: Despliegue de Infraestructura (VPC & EKS)
+
+**Objetivo:** Provisionar la red base y el plano de control de Kubernetes.
+
+### Paso 1: Desplegar Red VPC
 ```bash
-# 1. Crear VPC
 cd ~/aws-eks-enterprise-gitops/iac/live/dev/vpc
-rm -rf .terragrunt-cache .terraform .terraform.lock.hcl
-terragrunt init && terragrunt apply -auto-approve
 
-# 2. Crear EKS (Tarda 15 min)
+# Limpiar caché local para evitar errores de estado
+rm -rf .terragrunt-cache .terraform .terraform.lock.hcl
+
+# Inicializar y Aplicar
+terragrunt init
+terragrunt apply -auto-approve
+```
+
+### Paso 2: Desplegar Clúster EKS
+> ⏳ **Nota:** Este paso tarda aproximadamente 15-20 minutos. No interrumpas el proceso.
+
+```bash
 cd ~/aws-eks-enterprise-gitops/iac/live/dev/eks
-rm -rf .terragrunt-cache .terraform .terraform.lock.hcl
-terragrunt init && terragrunt apply -auto-approve
 
-# 3. Conectar CLI
+rm -rf .terragrunt-cache .terraform .terraform.lock.hcl
+terragrunt init
+terragrunt apply -auto-approve
+```
+
+### Paso 3: Configurar Acceso Local (Kubeconfig)
+```bash
 aws eks update-kubeconfig --region us-east-1 --name eks-gitops-dev
+kubectl get nodes
+# Deberías ver los nodos en estado 'Ready'
 ```
 
 ---
 
-## 3. Fase 2: Plataforma ArgoCD
+## 4. Fase 2: Plataforma GitOps (ArgoCD)
 
-**⚠️ CRÍTICO:** Evitar error de sintaxis en Helm Provider v3.x.
+**Objetivo:** Instalar el motor de despliegue continuo dentro del clúster.
 
-### Paso 1: Configurar Versión Helm
-Edita `iac/modules/argo-platform/versions.tf`:
-
-```hcl
-helm = {
-  source  = "hashicorp/helm"
-  version = "~> 2.12"  # 🛑 USAR SERIE 2.X ESTABLE
-}
-```
-
-### Paso 2: Despliegue
+### Paso 1: Desplegar ArgoCD vía Helm/Terragrunt
 ```bash
 cd ~/aws-eks-enterprise-gitops/iac/live/dev/platform
-terragrunt init && terragrunt apply -auto-approve
+
+rm -rf .terragrunt-cache .terraform .terraform.lock.hcl
+terragrunt init
+terragrunt apply -auto-approve
 ```
 
-### Paso 3: Acceso (Guardar credenciales)
-```bash
-# Password:
-kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo
+### Paso 2: Obtener Credenciales de Acceso
+Ejecuta este bloque para imprimir la URL y la contraseña de administrador:
 
-# URL:
-kubectl -n argocd get svc argocd-server -o jsonpath="{.status.loadBalancer.ingress[0].hostname}"; echo
+```bash
+echo "==================================================="
+echo "🌐 URL ArgoCD (LoadBalancer):"
+kubectl -n argocd get svc argocd-server -o jsonpath="{.status.loadBalancer.ingress[0].hostname}"; echo ""
+echo ""
+echo "🔑 Password Admin (User: admin):"
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo ""
+echo "==================================================="
 ```
 
 ---
 
-## 4. Fase 3: GitOps & Canary Automático
+## 5. Fase 3: Operación (Canary Deployments)
 
-Para evitar tener que aprobar manualmente en la UI, configura las pausas con tiempo.
+**Objetivo:** Desplegar una aplicación y observar la gestión de tráfico automatizada.
 
-### Configuración del Rollout (`rollout.yaml`)
-En `app-source/helm-chart/templates/rollout.yaml`:
+### Configuración Recomendada (`rollout.yaml`)
+Asegúrate de que tu `rollout.yaml` use pausas temporizadas para evitar bloqueos manuales si no usas la UI avanzada:
 
 ```yaml
   strategy:
     canary:
       steps:
       - setWeight: 20
-      - pause: {duration: 10} # ⏳ Automatización activada
+      - pause: {duration: 10} # Avance automático tras 10s
       - setWeight: 50
       - pause: {duration: 10}
-      - setWeight: 80
-      - pause: {duration: 10}
+```
+
+### Despliegue Inicial
+```bash
+cd ~/aws-eks-enterprise-gitops
+# Asegúrate de que los cambios estén en Git (Push)
+kubectl apply -f gitops-manifests/apps/colors-app.yaml
 ```
 
 ---
 
-## 5. Fase 4: Protocolo de Destrucción (FinOps)
+## 6. Fase 4: Protocolo de Destrucción TOTAL (FinOps)
 
-**⛔ NO EJECUTES `destroy-all`. Sigue este orden estricto para evitar facturas.**
+**⚠️ CRÍTICO:** Sigue este orden estrictamente para evitar costos residuales. Este proceso está diseñado para limpiar dependencias que Terraform a veces no puede eliminar.
 
-### Paso 1: Matar la Aplicación (Liberar Load Balancers)
+### 🛑 PASO 1: Eliminar Capa de Aplicación
+Esto libera los Balanceadores de Carga (ALB/ELB) que generan costos por hora.
+
 ```bash
+echo "🔥 Destruyendo Plataforma (ArgoCD)..."
 cd ~/aws-eks-enterprise-gitops/iac/live/dev/platform
 terragrunt destroy -auto-approve
 ```
-*Verificación:* Ejecuta `scripts/finops_audit.sh`. La sección "Load Balancers" debe estar vacía.
 
-### Paso 2: Matar el Clúster EKS (Liberar EC2 y NAT)
+### 🛑 PASO 2: Eliminar Clúster EKS
+Esto libera las instancias EC2 y el NAT Gateway.
+
 ```bash
+echo "🔥 Destruyendo EKS Cluster..."
 cd ~/aws-eks-enterprise-gitops/iac/live/dev/eks
 terragrunt destroy -auto-approve
 ```
-*Si falla:* Usa `aws eks delete-cluster` y espera a que los nodos mueran.
 
-### Paso 3: Limpieza Nuclear de VPC (Anti-Zombies)
-Antes de borrar la VPC con Terraform, limpia la basura residual:
+#### 🚑 Plan de Contingencia (Si Terragrunt falla/timeout)
+Si el comando anterior falla, usa este bloque de fuerza bruta con la CLI de AWS:
 
 ```bash
-# Obtén el ID de la VPC con el script de auditoría
-VPC_ID="vpc-xxxxxxxx" 
-./scripts/nuke_vpc.sh $VPC_ID
+# BLOQUE DE EMERGENCIA: Copiar y pegar si Terragrunt falla
+CLUSTER_NAME="eks-gitops-dev"
+REGION="us-east-1"
+
+# 1. Eliminar Grupo de Nodos
+NODE_GROUP=$(aws eks list-nodegroups --cluster-name $CLUSTER_NAME --region $REGION --query "nodegroups[0]" --output text)
+if [ "$NODE_GROUP" != "None" ]; then
+    echo "⚠️ Eliminando NodeGroup por fuerza: $NODE_GROUP"
+    aws eks delete-nodegroup --cluster-name $CLUSTER_NAME --nodegroup-name $NODE_GROUP --region $REGION
+    echo "⏳ Esperando a que mueran los nodos (5-10 min)..."
+    aws eks wait nodegroup-deleted --cluster-name $CLUSTER_NAME --nodegroup-name $NODE_GROUP --region $REGION
+fi
+
+# 2. Eliminar Clúster
+echo "⚠️ Eliminando Clúster..."
+aws eks delete-cluster --name $CLUSTER_NAME --region $REGION
+echo "⏳ Esperando eliminación final..."
+aws eks wait cluster-deleted --name $CLUSTER_NAME --region $REGION
+echo "✅ Clúster eliminado manualmente."
 ```
 
-### Paso 4: Destrucción Final
+### 🛑 PASO 3: Limpieza Nuclear de VPC (Anti-Zombies)
+Antes de borrar la VPC, debemos eliminar las Interfaces de Red (ENIs) y Security Groups huérfanos que impiden el borrado.
+
+**Ejecuta este bloque completo:**
+
 ```bash
+cd ~/aws-eks-enterprise-gitops
+
+# 1. Detectar ID de la VPC automáticamente
+VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Project,Values=AWS-EKS-Enterprise-GitOps" --query "Vpcs[0].VpcId" --output text)
+
+echo "🎯 Objetivo detectado para limpieza: $VPC_ID"
+
+# 2. Ejecutar Script de Limpieza (Nuke)
+if [ "$VPC_ID" != "None" ] && [ -n "$VPC_ID" ]; then
+    ./scripts/nuke_vpc.sh $VPC_ID
+else
+    echo "⚠️ No se encontró la VPC. ¿Ya fue borrada?"
+fi
+```
+
+### 🛑 PASO 4: Destrucción Final de la VPC
+Ahora que la VPC está limpia de dependencias, Terragrunt puede eliminarla.
+
+```bash
+echo "🔥 Destruyendo Red VPC..."
 cd ~/aws-eks-enterprise-gitops/iac/live/dev/vpc
 terragrunt destroy -auto-approve
 ```
 
-### Paso 5: Auditoría Final
+### 🛑 PASO 5: Auditoría Final (La Prueba de la Verdad)
+Ejecuta esto para asegurarte de que tu factura será **$0.00**.
+
 ```bash
+cd ~/aws-eks-enterprise-gitops
 ./scripts/finops_audit.sh
 ```
-Debes ver: **✅ AUDITORÍA LIMPIA.**
+
+**Resultado Esperado:**
+> **✅ AUDITORÍA LIMPIA: No se detectaron recursos activos del proyecto.**
 
 ---
-
-## Sesión de Contacto
-
-| Rol | Nombre | Proyecto |
-| :--- | :--- | :--- |
-| **Owner** | Jose Garagorry | AWS EKS Enterprise GitOps |
-| **Soporte AI** | Gemini | Troubleshooting & Optimization |
-| **Estado** | 🟢 PRODUCTION READY | v2.0 Stable |
-
-> *Este documento es idempotente y safe-to-fail.*
+**Fin del Procedimiento.**
