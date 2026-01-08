@@ -1,4 +1,4 @@
-# 📘 AWS EKS Enterprise GitOps - Master Runbook v4.4
+# 📘 AWS EKS Enterprise GitOps - Master Runbook v4.5
 
 ![AWS](https://img.shields.io/badge/AWS-232F3E?style=for-the-badge&logo=amazon-aws&logoColor=white)
 ![Kubernetes](https://img.shields.io/badge/kubernetes-%23326ce5.svg?style=for-the-badge&logo=kubernetes&logoColor=white)
@@ -16,7 +16,7 @@ Este documento es el Procedimiento Operativo Estándar (SOP) definitivo. Diseña
 3. [Fase 0: Cimientos (Backend Bootstrap)](#3-fase-0-cimientos-backend-bootstrap)
 4. [Fase 1: Despliegue de Infraestructura](#4-fase-1-despliegue-de-infraestructura)
 5. [Fase 2: Plataforma GitOps](#5-fase-2-plataforma-gitops)
-6. [Fase 3: Operación](#6-fase-3-operación)
+6. [Fase 3: Operación (Despliegue Canary)](#6-fase-3-operación-despliegue-canary)
 7. [Fase 4: Destrucción Total (Protocolo Anti-Zombies)](#7-fase-4-destrucción-total-protocolo-anti-zombies)
 8. [Apéndice: Troubleshooting](#8-apéndice-troubleshooting)
 
@@ -167,15 +167,34 @@ kubectl apply -f gitops-manifests/apps/colors-app.yaml
 
 ---
 
-## 6. Fase 3: Operación
+## 6. Fase 3: Operación (Despliegue Canary)
 
-1.  Hacer cambios en el código:
-    ```bash
-    git add .
-    git commit -m "feat: new version"
-    git push
-    ```
-2.  ArgoCD sincronizará automáticamente los cambios detectados en Git.
+Vamos a simular el ciclo de vida real de un desarrollador lanzando una nueva versión.
+
+**1. Modificar el Código (Feature Release):**
+Vamos a cambiar el color de la aplicación de `blue` a `green`.
+
+```bash
+# Editar el archivo de valores del Helm Chart
+nano app-source/helm-chart/values.yaml
+```
+*Busca la línea `color: blue` y cámbiala a `color: green`.*
+*(Guarda con `Ctrl+O`, `Enter` y sal con `Ctrl+X`)*
+
+**2. Enviar cambios a Git (El Disparador):**
+ArgoCD detectará este cambio automáticamente.
+
+```bash
+git add .
+git commit -m "feat: upgrade app to green version"
+git push
+```
+
+**3. Observar la Magia en ArgoCD:**
+* Ve al Dashboard de ArgoCD inmediatamente.
+* Verás que el estado cambia a **"Processing"**.
+* **Argo Rollouts** creará nuevos pods (versión Green) pero mantendrá los viejos (Blue).
+* El despliegue se pausará automáticamente (Estrategia Canary) esperando validación.
 
 ---
 
