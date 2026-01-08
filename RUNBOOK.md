@@ -1,4 +1,4 @@
-# 📘 AWS EKS Enterprise GitOps - Master Runbook v4.2
+# 📘 AWS EKS Enterprise GitOps - Master Runbook v4.3
 
 ![AWS](https://img.shields.io/badge/AWS-232F3E?style=for-the-badge&logo=amazon-aws&logoColor=white)
 ![Kubernetes](https://img.shields.io/badge/kubernetes-%23326ce5.svg?style=for-the-badge&logo=kubernetes&logoColor=white)
@@ -6,7 +6,7 @@
 ![Terragrunt](https://img.shields.io/badge/terragrunt-%235835CC.svg?style=for-the-badge&logo=terraform&logoColor=white)
 ![FinOps](https://img.shields.io/badge/FinOps-Zero%20Waste-success?style=for-the-badge&logo=cash-app&logoColor=white)
 
-Este documento es el Procedimiento Operativo Estándar (SOP) definitivo. Incluye gestión dinámica de Backends, protocolos de limpieza automatizada y guía de solución de problemas.
+Este documento es el Procedimiento Operativo Estándar (SOP) definitivo. Diseñado para garantizar la consistencia, la seguridad y el costo cero al finalizar.
 
 ---
 
@@ -17,8 +17,8 @@ Este documento es el Procedimiento Operativo Estándar (SOP) definitivo. Incluye
 4. [Fase 1: Despliegue de Infraestructura](#4-fase-1-despliegue-de-infraestructura)
 5. [Fase 2: Plataforma GitOps](#5-fase-2-plataforma-gitops)
 6. [Fase 3: Operación](#6-fase-3-operación)
-7. [Fase 4: Destrucción Total (Protocolo FinOps)](#7-fase-4-destrucción-total-protocolo-finops)
-8. [Apéndice: Solución de Problemas (Troubleshooting)](#8-apéndice-solución-de-problemas-troubleshooting)
+7. [Fase 4: Destrucción Total (Protocolo Anti-Zombies)](#7-fase-4-destrucción-total-protocolo-anti-zombies)
+8. [Apéndice: Troubleshooting](#8-apéndice-troubleshooting)
 
 ---
 
@@ -169,9 +169,9 @@ echo "🔑 Pass:" && kubectl -n argocd get secret argocd-initial-admin-secret -o
 
 ---
 
-## 7. Fase 4: Destrucción Total (Protocolo FinOps)
+## 7. Fase 4: Destrucción Total (Protocolo Anti-Zombies)
 
-**⚠️ ADVERTENCIA:** Sigue este orden estrictamente. El orden incorrecto generará "Recursos Zombies" difíciles de borrar.
+**⚠️ ADVERTENCIA:** Sigue este orden estrictamente para evitar costos y errores futuros.
 
 ### 1. Destruir Capas Superiores (Apps & EKS)
 ```bash
@@ -184,24 +184,28 @@ cd ~/aws-eks-enterprise-gitops/iac/live/dev/eks
 terragrunt destroy -auto-approve
 ```
 
-### 2. Limpieza Nuclear de VPC
-Elimina dependencias "zombies" (ENIs, Security Groups).
+### 2. Limpieza de Red y Zombies (VPC + Residuos)
+Ejecuta esto para eliminar dependencias de red y **recursos "zombies" (Logs, KMS)** que Terraform suele dejar atrás.
 
 ```bash
 cd ~/aws-eks-enterprise-gitops
-# Detecta ID de VPC y fuerza limpieza
+
+# 1. Detectar y limpiar dependencias VPC
 VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Project,Values=AWS-EKS-Enterprise-GitOps" --query "Vpcs[0].VpcId" --output text)
 ./scripts/nuke_vpc.sh $VPC_ID
 
-# Destruir VPC formalmente
+# 2. Destruir VPC formalmente
 cd ~/aws-eks-enterprise-gitops/iac/live/dev/vpc
 terragrunt destroy -auto-approve
+
+# 3. ELIMINAR ZOMBIES (Paso Crítico Preventivo)
+# Esto borra Log Groups y Alias KMS huérfanos para evitar errores al recrear el lab.
+cd ~/aws-eks-enterprise-gitops
+./scripts/nuke_zombies.sh
 ```
 
 ### 3. Eliminar Backend (El "Gran Reset")
-**🛑 ALTO:** Solo ejecuta esto si los pasos 1 y 2 fueron exitosos y el clúster YA NO EXISTE en la consola de AWS.
-
-Si borras el Backend mientras el EKS sigue vivo, perderás la capacidad de gestionarlo (Ver Apéndice: Troubleshooting).
+**🛑 ALTO:** Solo ejecuta esto si has completado el paso anterior (`nuke_zombies.sh`). Si borras el Backend mientras quedan recursos vivos, perderás el control sobre ellos.
 
 ```bash
 cd ~/aws-eks-enterprise-gitops
@@ -210,7 +214,7 @@ cd ~/aws-eks-enterprise-gitops
 *Escribe `NUKE` cuando se te solicite.*
 
 ### 4. Auditoría Final
-La prueba de fuego para tu billetera.
+La prueba de fuego. Debe salir todo en verde o vacío.
 
 ```bash
 ./scripts/finops_audit.sh
@@ -218,36 +222,24 @@ La prueba de fuego para tu billetera.
 
 ---
 
-## 8. Apéndice: Solución de Problemas (Troubleshooting)
+## 8. Apéndice: Troubleshooting
 
-Si alguna vez destruyes el Backend (Fase 4, Paso 3) **antes** de destruir la infraestructura, Terraform perderá la memoria de los recursos y al intentar desplegar de nuevo, encontrarás errores de tipo `AlreadyExists`.
+Si por error omitiste el paso `nuke_zombies.sh` y destruiste el Backend, al volver a desplegar verás estos errores:
 
 ### Caso 1: Error "KMS Alias Already Exists"
-**Síntoma:**
-`Error: creating KMS Alias (alias/eks/eks-gitops-dev) ... AlreadyExistsException`
-
-**Solución:**
-Eliminar el alias huérfano manualmente para permitir que Terraform cree uno nuevo.
+**Solución Manual:**
 ```bash
 aws kms delete-alias --alias-name alias/eks/eks-gitops-dev --region us-east-1
 ```
 
 ### Caso 2: Error "CloudWatch Log Group Already Exists"
-**Síntoma:**
-`Error: creating CloudWatch Logs Log Group ... ResourceAlreadyExistsException`
-
-**Solución:**
-Eliminar el grupo de logs remanente.
+**Solución Manual:**
 ```bash
 aws logs delete-log-group --log-group-name /aws/eks/eks-gitops-dev/cluster --region us-east-1
 ```
 
 ### Caso 3: Error "Saved plan is stale"
-**Síntoma:**
-Ocurre si generas un plan, cambias algo manualmente (como borrar un alias) y luego intentas aplicar ese plan viejo.
-
-**Solución:**
-Ejecutar el apply directamente para regenerar el plan al vuelo.
+**Solución:** Ejecutar `apply` directamente sin usar un archivo plan guardado.
 ```bash
 terragrunt apply -auto-approve
 ```
