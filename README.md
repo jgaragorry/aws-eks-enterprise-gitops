@@ -52,49 +52,55 @@ Este no es un tutorial de "Hello World". Este laboratorio simula un entorno corp
 ---
 ## 📐 Arquitectura y Flujo GitOps
 
-Este diagrama ilustra cómo fluye el cambio desde el código hasta la producción sin intervención manual directa en el clúster.
+Este diagrama ilustra el flujo de entrega continua desde el código hasta la infraestructura.
 
 ```mermaid
 graph TD
-    %% Definición de Nodos
-    Dev[👨‍💻 SysAdmin / DevOps]
-    Git[📂 GitHub Repo<br/>(IaC & Helm Charts)]
-    
-    subgraph AWS_Cloud [☁️ AWS Cloud]
-        style AWS_Cloud fill:#f9f9f9,stroke:#232F3E,stroke-width:2px
-        
-        subgraph VPC [🔒 VPC (us-east-1)]
-            style VPC fill:#ffffff,stroke:#green,stroke-dasharray: 5 5
-            
-            subgraph EKS [☸️ EKS Cluster]
+    %% Definición de Nodos Externos
+    User["👨‍💻 SysAdmin / DevOps"]
+    Git["📂 GitHub Repo<br/>(IaC & Helm Charts)"]
+
+    %% Nube AWS
+    subgraph AWS ["☁️ AWS Cloud"]
+        style AWS fill:#f9f9f9,stroke:#232F3E,stroke-width:2px
+
+        %% VPC
+        subgraph VPC ["🔒 VPC (us-east-1)"]
+            style VPC fill:#ffffff,stroke:green,stroke-dasharray: 5 5
+
+            %% EKS Cluster
+            subgraph EKS ["☸️ EKS Cluster"]
                 style EKS fill:#E1F5FE,stroke:#326ce5,stroke-width:2px
-                
-                ArgoCD[🐙 ArgoCD Controller]
-                Rollouts[🚀 Argo Rollouts]
-                
-                subgraph App_Namespace [Namespace: colors-ns]
-                    PodBlue[🟦 Pods V1 (Blue)]
-                    PodGreen[🟩 Pods V2 (Green)]
-                    Service[Lb Service]
+
+                ArgoCD["🐙 ArgoCD Controller"]
+                Rollouts["🚀 Argo Rollouts"]
+
+                %% Aplicación
+                subgraph App ["Namespace: colors-ns"]
+                    PodBlue["🟦 Pods V1 (Blue)"]
+                    PodGreen["🟩 Pods V2 (Green)"]
+                    Service["⚖️ LoadBalancer"]
                 end
             end
-            
-            NAT[NAT Gateway]
+
+            NAT["gateway NAT Gateway"]
         end
     end
 
-    %% Relaciones
-    Dev -->|git push| Git
+    %% Conexiones
+    User -->|git push| Git
     ArgoCD -->|Sync / Poll| Git
     ArgoCD -->|Apply Manifests| EKS
-    ArgoCD -.->|Feedback Status| Dev
-    
-    Rollouts -->|Manage Traffic 20%| PodGreen
-    Rollouts -->|Manage Traffic 80%| PodBlue
+    ArgoCD -.->|Feedback Status| User
+
+    %% Flujo Canary
+    Rollouts -->|Traffic 20%| PodGreen
+    Rollouts -->|Traffic 80%| PodBlue
     Service -->|User Traffic| PodBlue
     Service -->|User Traffic| PodGreen
-    
-    NAT -.->|Image Pull| EKS
+
+    %% Dependencia de Red
+    NAT -.->|Image Pull (DockerHub)| EKS
 ```
 
 ### 💡 ¿Qué explica este diagrama automáticamente?
