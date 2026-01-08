@@ -1,4 +1,4 @@
-# 📘 AWS EKS Enterprise GitOps - Master Runbook v3.0
+# 📘 AWS EKS Enterprise GitOps - Master Runbook v3.1
 
 ![AWS](https://img.shields.io/badge/AWS-232F3E?style=for-the-badge&logo=amazon-aws&logoColor=white)
 ![Kubernetes](https://img.shields.io/badge/kubernetes-%23326ce5.svg?style=for-the-badge&logo=kubernetes&logoColor=white)
@@ -105,7 +105,7 @@ graph TD
     Service -->|"User Traffic"| PodBlue
     Service -->|"User Traffic"| PodGreen
 
-    %% Dependencia de Red (Corrección de sintaxis aquí)
+    %% Dependencia de Red
     NAT -.->|"Image Pull (DockerHub)"| EKS
 ```
 
@@ -179,7 +179,7 @@ echo "==================================================="
 
 **Objetivo:** Desplegar una aplicación y observar la gestión de tráfico automatizada.
 
-### Configuración Recomendada (`rollout.yaml`)
+### 1. Configuración Recomendada (`rollout.yaml`)
 Asegúrate de que tu `rollout.yaml` use pausas temporizadas para evitar bloqueos manuales si no usas la UI avanzada:
 
 ```yaml
@@ -192,10 +192,18 @@ Asegúrate de que tu `rollout.yaml` use pausas temporizadas para evitar bloqueos
       - pause: {duration: 10}
 ```
 
-### Despliegue Inicial
+### 2. Despliegue Inicial (Commit & Push)
+Para que ArgoCD vea los cambios, debemos subirlos al repositorio Git primero.
+
 ```bash
 cd ~/aws-eks-enterprise-gitops
-# Asegúrate de que los cambios estén en Git (Push)
+
+# 1. Subir configuración al repositorio
+git add .
+git commit -m "chore: Update rollout strategy for auto-promotion"
+git push
+
+# 2. Crear la Aplicación en el Clúster
 kubectl apply -f gitops-manifests/apps/colors-app.yaml
 ```
 
