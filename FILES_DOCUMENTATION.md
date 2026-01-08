@@ -8,9 +8,9 @@ Este documento desglosa cada archivo de configuración utilizado en el laborator
 
 Antes de crear cualquier recurso, necesitamos definir **dónde** se guardará el estado y **quién** proveerá los recursos.
 
-### 1. `iac/live/terragrunt.hcl` (El Padre)
-* **Qué hace:** Es el archivo de configuración global. Define el bloque `remote_state` (S3 + DynamoDB) y genera el bloque `provider "aws"` dinámicamente.
-* **Contenido Clave:** Configuración del Bucket S3 `aws-eks-enterprise-gitops-state` y la tabla de bloqueo DynamoDB.
+### 1. `iac/live/root.hcl` (El Padre)
+* **Qué hace:** Es el archivo de configuración global. Define el bloque `remote_state` (S3 + DynamoDB) y genera el bloque `provider "aws"` dinámicamente usando el ID de la cuenta AWS.
+* **Contenido Clave:** Configuración dinámica del Bucket `eks-gitops-platform-tfstate-<ACCOUNT_ID>` y la tabla de bloqueo DynamoDB.
 * **Cuándo se usa:** Cada vez que ejecutas `terragrunt` en cualquier subcarpeta. Los hijos "heredan" esta configuración.
 * **Quién lo lee:** El binario de **Terragrunt** (antes de llamar a Terraform).
 * **Objetivo:** Principio DRY (Don't Repeat Yourself). Evitar copiar/pegar la configuración del backend en 10 sitios distintos.
@@ -18,7 +18,7 @@ Antes de crear cualquier recurso, necesitamos definir **dónde** se guardará el
 ```mermaid
 graph TD
     User[SysAdmin] -->|Ejecuta| TG[Terragrunt CLI]
-    TG -->|Lee| RootHCL[iac/live/terragrunt.hcl]
+    TG -->|Lee| RootHCL[iac/live/root.hcl]
     RootHCL -->|Genera Backend| S3[(S3 State)]
 ```
 
@@ -44,7 +44,7 @@ Aquí definimos la carretera por donde viajarán nuestros datos.
 
 ```mermaid
 graph TD
-    RootHCL[iac/live/terragrunt.hcl]
+    RootHCL[iac/live/root.hcl]
     
     subgraph Phase1_Network [Fase 1: Networking]
         style Phase1_Network fill:#e1f5fe
@@ -72,7 +72,7 @@ Ahora colocamos el motor (Kubernetes) sobre la carretera (VPC).
 
 ```mermaid
 graph TD
-    RootHCL[iac/live/terragrunt.hcl]
+    RootHCL[iac/live/root.hcl]
     AWS_VPC[☁️ AWS VPC]
 
     subgraph Phase2_Compute [Fase 2: Compute]
@@ -99,125 +99,34 @@ Instalamos el "cerebro" que gestionará las aplicaciones.
 * **Cuándo se usa:** Fase de bootstrapping de aplicaciones.
 * **Objetivo:** Dejar el clúster listo con ArgoCD y Argo Rollouts funcionando.
 
-```mermaid
-graph TD
-    AWS_EKS[☸️ EKS Cluster]
-
-    subgraph Phase3_Platform [Fase 3: Plataforma]
-        style Phase3_Platform fill:#f8bbd0
-        Platform_HCL[dev/platform/terragrunt.hcl] -->|Lee Credenciales| AWS_EKS
-        Platform_HCL -->|Instancia| Argo_Mod[module/argo-platform]
-        Argo_Mod -->|Helm Install| ArgoCD[🐙 ArgoCD Pods]
-    end
-    
-    ArgoCD -.->|Corre dentro de| AWS_EKS
-```
-
----
-
-## 🚀 Nivel 4: Aplicación (GitOps & Rollouts)
-
-Archivos que viven en Git y definen *qué* debe correr, no *dónde*.
-
-### 9. `gitops-manifests/apps/colors-app.yaml` (El Contrato)
-* **Qué hace:** Es un CRD (Custom Resource Definition) de tipo `Application`. Le dice a ArgoCD: "Vigila la carpeta `app-source/helm-chart` en este repo".
-* **Quién lo lee:** El controlador de ArgoCD dentro del clúster.
-* **Objetivo:** Automatización pura. Conectar Git con K8s.
-
-### 10. `app-source/helm-chart/templates/rollout.yaml` (La Estrategia)
-* **Qué hace:** Sustituye al `Deployment` tradicional. Define la lógica Canary (`steps`, `setWeight`, `pause`).
-* **Quién lo lee:** El controlador de Argo Rollouts.
-* **Objetivo:** Progressive Delivery. Permitir actualizaciones seguras (Blue/Green/Canary).
-
-```mermaid
-graph TD
-    ArgoCD[🐙 ArgoCD Pods]
-    Repo[📂 GitHub Repo]
-
-    subgraph Phase4_GitOps [Fase 4: Aplicación]
-        style Phase4_GitOps fill:#c8e6c9
-        App_Manifest[colors-app.yaml] -->|Define Source| Repo
-        Rollout_Yaml[rollout.yaml] -->|Define Strategy| Canary[🚦 Canary Logic]
-    end
-
-    ArgoCD -->|Sync/Pull| App_Manifest
-    ArgoCD -->|Aplica| Rollout_Yaml
-```
-
 ---
 
 ## 🛡️ Nivel 5: FinOps & Seguridad (Scripts)
 
-Herramientas de mantenimiento y limpieza.
+Automatización Bash para garantizar consistencia y limpieza FinOps.
 
-### 11. `scripts/finops_audit.sh` (El Auditor)
-* **Qué hace:** Usa AWS CLI para listar recursos costosos (LB, NAT, EIP) filtrando por Tag de proyecto.
-* **Cuándo se usa:** Después de `destroy` para asegurar costo cero.
-* **Objetivo:** Evitar facturas sorpresa.
+### 9. `scripts/setup_backend.sh` (El Constructor)
+* **Función:** Crea los recursos base (S3 + DynamoDB) para el estado de Terraform.
+* **Seguridad:** Aplica cifrado AES256, bloquea acceso público y activa versionado.
+* **Lógica:** Genera nombres dinámicos basados en el ID de cuenta AWS (`eks-gitops-platform-tfstate-<ACCOUNT_ID>`) para evitar conflictos de nombres globales.
 
-### 12. `scripts/nuke_vpc.sh` (El Exterminador)
-* **Qué hace:** Rompe dependencias cíclicas. Busca ENIs y Security Groups huérfanos y los fuerza a borrarse.
-* **Cuándo se usa:** Cuando Terraform falla al borrar la VPC por error `DependencyViolation`.
-* **Objetivo:** Limpieza nuclear cuando la vía diplomática (Terraform) falla.
+### 10. `scripts/check_backend.sh` (El Monitor)
+* **Función:** Verifica si el backend existe y es accesible.
+* **Uso:** Ejecutar antes de empezar para validar prerrequisitos y después de terminar para validar limpieza.
 
----
+### 11. `scripts/nuke_backend_smart.sh` (El Destructor Inteligente)
+* **Función:** Elimina el backend creado por `setup_backend.sh`.
+* **Seguridad:** Requiere confirmación manual ("NUKE").
+* **Capacidades:** Vacia versiones de objetos S3 (necesario para buckets con versionado) antes de borrar el bucket. Detecta dinámicamente el nombre correcto del recurso.
 
-## 🗺️ Diagrama de Flujo Completo
+### 12. `scripts/finops_audit.sh` (El Auditor)
+* **Función:** Escanea la cuenta de AWS en busca de recursos costosos huérfanos (Load Balancers, EIPs, Volúmenes EBS, NAT Gateways).
+* **Objetivo:** Garantizar costo cero al finalizar el laboratorio.
 
-Así interactúan todos los archivos desde el inicio hasta el fin:
-
-```mermaid
-graph TD
-    %% Estilos
-    classDef hcl fill:#f9f,stroke:#333,stroke-width:2px;
-    classDef tf fill:#b3e5fc,stroke:#333,stroke-width:2px;
-    classDef yaml fill:#c8e6c9,stroke:#333,stroke-width:2px;
-    classDef script fill:#ffccbc,stroke:#333,stroke-width:2px;
-
-    %% Nodos
-    Root[iac/live/terragrunt.hcl]:::hcl
-    
-    subgraph Infra
-        VPC_TG[vpc/terragrunt.hcl]:::hcl
-        EKS_TG[eks/terragrunt.hcl]:::hcl
-        VPC_TF[modules/vpc/main.tf]:::tf
-        EKS_TF[modules/eks/main.tf]:::tf
-    end
-
-    subgraph Platform
-        Plat_TG[platform/terragrunt.hcl]:::hcl
-        Argo_TF[modules/argo/main.tf]:::tf
-    end
-
-    subgraph GitOps
-        App_YAML[colors-app.yaml]:::yaml
-        Rollout_YAML[rollout.yaml]:::yaml
-    end
-
-    subgraph Ops
-        Nuke[nuke_vpc.sh]:::script
-        Audit[finops_audit.sh]:::script
-    end
-
-    %% Relaciones
-    VPC_TG -->|Inherit| Root
-    EKS_TG -->|Inherit| Root
-    Plat_TG -->|Inherit| Root
-
-    VPC_TG -->|Uses| VPC_TF
-    EKS_TG -->|Uses| EKS_TF
-    EKS_TG -->|Depends on| VPC_TG
-
-    Plat_TG -->|Uses| Argo_TF
-    Plat_TG -->|Connects to| EKS_TF
-
-    Argo_TF -->|Installs Controller| App_YAML
-    App_YAML -->|Deploys| Rollout_YAML
-
-    Nuke -->|Cleans| VPC_TF
-    Audit -->|Verifies| Infra
-```
+### 13. `scripts/nuke_vpc.sh` (El Exterminador)
+* **Función:** Rompe dependencias cíclicas. Busca ENIs y Security Groups huérfanos y los fuerza a borrarse cuando Terraform falla al borrar la VPC.
 
 ---
+
 **Autor:** Jose Garagorry
 **Proyecto:** AWS EKS Enterprise GitOps
