@@ -1,4 +1,4 @@
-# 📘 AWS EKS Enterprise GitOps - Master Runbook v4.3
+# 📘 AWS EKS Enterprise GitOps - Master Runbook v4.4
 
 ![AWS](https://img.shields.io/badge/AWS-232F3E?style=for-the-badge&logo=amazon-aws&logoColor=white)
 ![Kubernetes](https://img.shields.io/badge/kubernetes-%23326ce5.svg?style=for-the-badge&logo=kubernetes&logoColor=white)
@@ -141,19 +141,29 @@ kubectl get nodes
 
 ## 5. Fase 2: Plataforma GitOps
 
-**Objetivo:** Instalar ArgoCD.
+**Objetivo:** Instalar ArgoCD y conectar la primera aplicación.
 
+### Paso 1: Desplegar ArgoCD
 ```bash
 cd ~/aws-eks-enterprise-gitops/iac/live/dev/platform
 terragrunt init
 terragrunt apply -auto-approve
 ```
 
-**Obtener Credenciales de ArgoCD:**
+### Paso 2: Obtener Credenciales
 ```bash
 echo "🌐 URL:" && kubectl -n argocd get svc argocd-server -o jsonpath="{.status.loadBalancer.ingress[0].hostname}"; echo ""
 echo "🔑 Pass:" && kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d; echo ""
 ```
+
+### Paso 3: Registrar la Aplicación (Bootstrapping)
+**¡CRÍTICO!** ArgoCD arranca vacío. Ejecuta esto para crear la aplicación en el Dashboard:
+
+```bash
+cd ~/aws-eks-enterprise-gitops
+kubectl apply -f gitops-manifests/apps/colors-app.yaml
+```
+*Ahora verifica el Dashboard: Deberías ver la tarjeta "colors-app" sincronizando.*
 
 ---
 
@@ -165,7 +175,7 @@ echo "🔑 Pass:" && kubectl -n argocd get secret argocd-initial-admin-secret -o
     git commit -m "feat: new version"
     git push
     ```
-2.  ArgoCD sincronizará automáticamente.
+2.  ArgoCD sincronizará automáticamente los cambios detectados en Git.
 
 ---
 
@@ -224,16 +234,14 @@ La prueba de fuego. Debe salir todo en verde o vacío.
 
 ## 8. Apéndice: Troubleshooting
 
-Si por error omitiste el paso `nuke_zombies.sh` y destruiste el Backend, al volver a desplegar verás estos errores:
+Si por error omitiste el paso `nuke_zombies.sh` y destruiste el Backend, al volver a desplegar verás estos errores. Usa estos comandos para corregirlos:
 
 ### Caso 1: Error "KMS Alias Already Exists"
-**Solución Manual:**
 ```bash
 aws kms delete-alias --alias-name alias/eks/eks-gitops-dev --region us-east-1
 ```
 
 ### Caso 2: Error "CloudWatch Log Group Already Exists"
-**Solución Manual:**
 ```bash
 aws logs delete-log-group --log-group-name /aws/eks/eks-gitops-dev/cluster --region us-east-1
 ```
