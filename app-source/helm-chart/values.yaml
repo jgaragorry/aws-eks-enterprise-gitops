@@ -2,7 +2,7 @@ replicaCount: 4
 image:
   repository: argoproj/rollouts-demo
   pullPolicy: Always
-  tag: "yellow" # Empezamos con color AZUL
+  tag: "blue" # Empezamos con color AZUL
 service:
   type: LoadBalancer # Para poder verla desde internet
   port: 80
