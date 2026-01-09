@@ -1,21 +1,28 @@
 #!/bin/bash
 REGION="us-east-1"
-TAG_KEY="Project"
-TAG_VALUE="AWS-EKS-Enterprise-GitOps"
+# CAMBIO CLAVE: Buscamos por la etiqueta 'Name' que sí existe en tu Terraform
+TAG_KEY="Name"
+TAG_VALUE="gitops-platform-dev-vpc"
 
-echo "🔥 NUKE: Buscando Load Balancers Zombies (Classic & V2)..."
+echo "🔥 NUKE LOAD BALANCERS: Buscando recursos huérfanos..."
 
-# 1. Obtener VPC ID
+# 1. Obtener VPC ID usando la etiqueta Name
 VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:$TAG_KEY,Values=$TAG_VALUE" --query "Vpcs[0].VpcId" --output text --region $REGION)
 
 if [ "$VPC_ID" == "None" ] || [ -z "$VPC_ID" ]; then
-    echo "✅ No se detectó VPC del proyecto. Nada que limpiar."
+    echo "⚠️  No se detectó la VPC '$TAG_VALUE'. Intentando búsqueda alternativa..."
+    # Intento de respaldo por si acaso
+    VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Project,Values=AWS-EKS-Enterprise-GitOps" --query "Vpcs[0].VpcId" --output text --region $REGION)
+fi
+
+if [ "$VPC_ID" == "None" ] || [ -z "$VPC_ID" ]; then
+    echo "✅ No se encontró ninguna VPC activa. Nada que limpiar."
     exit 0
 fi
 
-echo "   -> Objetivo: VPC $VPC_ID"
+echo "🎯 Objetivo detectado: VPC $VPC_ID"
 
-# 2. Borrar Classic ELBs (Los culpables habituales)
+# 2. Borrar Classic ELBs (Los culpables del bloqueo)
 CLB_NAMES=$(aws elb describe-load-balancers --region $REGION --query "LoadBalancerDescriptions[?VPCId=='$VPC_ID'].LoadBalancerName" --output text)
 if [ ! -z "$CLB_NAMES" ]; then
     for clb in $CLB_NAMES; do
@@ -37,6 +44,6 @@ else
     echo "✅ No hay ELB v2 activos."
 fi
 
-echo "⏳ Esperando 15s para liberación de interfaces..."
+echo "⏳ Esperando 15s para que AWS libere las interfaces..."
 sleep 15
 echo "✨ Limpieza de Balanceadores completada."

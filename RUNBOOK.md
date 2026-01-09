@@ -144,7 +144,8 @@ cd ~/aws-eks-enterprise-gitops
 ./scripts/nuke_loadbalancers.sh
 
 # 3. Limpieza de Interfaces de Red
-VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Project,Values=AWS-EKS-Enterprise-GitOps" --query "Vpcs[0].VpcId" --output text)
+# CORRECCIÓN V5.0: Buscamos por etiqueta 'Name' para asegurar que encontramos el ID
+VPC_ID=$(aws ec2 describe-vpcs --filters "Name=tag:Name,Values=gitops-platform-dev-vpc" --query "Vpcs[0].VpcId" --output text)
 ./scripts/nuke_vpc.sh $VPC_ID
 
 # 4. Destruir VPC (Ahora que está limpia)
