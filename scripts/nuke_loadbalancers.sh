@@ -1,5 +1,4 @@
 #!/bin/bash
-# scripts/nuke_loadbalancers.sh
 REGION="us-east-1"
 TAG_KEY="Project"
 TAG_VALUE="AWS-EKS-Enterprise-GitOps"
