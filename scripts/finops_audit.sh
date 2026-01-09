@@ -1,42 +1,48 @@
 #!/bin/bash
 REGION="us-east-1"
 echo "================================================================="
-echo "💀 AUDITORÍA EXTREMA FINOPS (SIN FILTROS) - REGIÓN: $REGION"
-echo "   NOTA: Si las tablas aparecen vacías o solo con encabezados,"
-echo "         significa que NO hay recursos y no pagarás nada."
+echo "💀 AUDITORÍA ULTIMATE FINOPS - REGIÓN: $REGION"
+echo "   OBJETIVO: Detección de CUALQUIER recurso facturable."
 echo "================================================================="
 
-# 1. COMPUTACIÓN
-echo "🔍 1. Instancias EC2..."
-aws ec2 describe-instances --region $REGION --query 'Reservations[*].Instances[*].{ID:InstanceId,State:State.Name,Tags:Tags}' --output table
+# --- CAPA 1: CÓMPUTO Y RED (Los caros) ---
+echo "🔍 1. Instancias EC2 (Running/Stopped)..."
+aws ec2 describe-instances --region $REGION --query 'Reservations[*].Instances[*].{ID:InstanceId,State:State.Name}' --output table
 
-# 2. ALMACENAMIENTO
-echo "🔍 2. Volúmenes EBS..."
-aws ec2 describe-volumes --region $REGION --query 'Volumes[*].{ID:VolumeId,Size:Size,State:State}' --output table
-
-echo "🔍 3. Snapshots..."
-aws ec2 describe-snapshots --owner-ids self --region $REGION --query 'Snapshots[*].{ID:SnapshotId,Size:VolumeSize}' --output table
-
-# 3. RED (CRÍTICO)
-echo "🔍 4. Load Balancers V2 (ALB/NLB)..."
-aws elbv2 describe-load-balancers --region $REGION --query 'LoadBalancers[*].{ARN:LoadBalancerArn,DNS:DNSName}' --output table
-
-echo "🔍 5. Classic Load Balancers (ELB v1)..."
-aws elb describe-load-balancers --region $REGION --query 'LoadBalancerDescriptions[*].{Name:LoadBalancerName,DNS:DNSName}' --output table
-
-echo "🔍 6. NAT Gateways..."
+echo "🔍 2. NAT Gateways (Costo por hora)..."
 aws ec2 describe-nat-gateways --region $REGION --filter "Name=state,Values=available,pending" --query 'NatGateways[*].{ID:NatGatewayId,State:State}' --output table
 
-echo "🔍 7. IPs Elásticas..."
-aws ec2 describe-addresses --region $REGION --query 'Addresses[*].{IP:PublicIp,AssocId:AssociationId}' --output table
+echo "🔍 3. Load Balancers (Classic & V2)..."
+aws elb describe-load-balancers --region $REGION --query 'LoadBalancerDescriptions[*].{Name:LoadBalancerName,DNS:DNSName}' --output table
+aws elbv2 describe-load-balancers --region $REGION --query 'LoadBalancers[*].{ARN:LoadBalancerArn,DNS:DNSName}' --output table
 
-# 4. PLATAFORMA
-echo "🔍 8. Clusters EKS..."
+echo "🔍 4. Clusters EKS..."
 aws eks list-clusters --region $REGION --output table
 
-echo "🔍 9. Bases de Datos RDS..."
+# --- CAPA 2: ALMACENAMIENTO Y DATOS ---
+echo "🔍 5. Volúmenes EBS y Snapshots..."
+aws ec2 describe-volumes --region $REGION --query 'Volumes[*].{ID:VolumeId,State:State}' --output table
+aws ec2 describe-snapshots --owner-ids self --region $REGION --query 'Snapshots[*].{ID:SnapshotId,Size:VolumeSize}' --output table
+
+echo "🔍 6. Bases de Datos RDS..."
 aws rds describe-db-instances --region $REGION --query 'DBInstances[*].{ID:DBInstanceIdentifier,Status:DBInstanceStatus}' --output table
 
+# --- CAPA 3: RESIDUOS PERSISTENTES (Lo que faltaba) ---
+echo "🔍 7. Buckets S3 (Almacenamiento de estado)..."
+aws s3api list-buckets --query 'Buckets[].Name' --output table
+
+echo "🔍 8. Tablas DynamoDB (Locks de Terraform)..."
+aws dynamodb list-tables --region $REGION --output table
+
+echo "🔍 9. CloudWatch Log Groups (Logs residuales)..."
+aws logs describe-log-groups --region $REGION --query 'logGroups[*].logGroupName' --output table
+
+echo "🔍 10. Elastic IPs (IPs reservadas)..."
+aws ec2 describe-addresses --region $REGION --query 'Addresses[*].{IP:PublicIp,AssocId:AssociationId}' --output table
+
 echo "================================================================="
-echo "✅ FIN DE LA AUDITORÍA."
+echo "✅ VEREDICTO FINAL:"
+echo "   - Si TODO sale vacío/None: Costo $0 garantizado."
+echo "   - Si ves Buckets o Tablas: Ejecuta ./scripts/nuke_backend_smart.sh"
+echo "   - Si ves Logs: Ejecuta ./scripts/nuke_zombies.sh"
 echo "================================================================="
